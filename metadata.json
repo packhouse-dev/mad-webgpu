@@ -1,0 +1,6 @@
+{
+  "name": "Multiplayer Game Prototype",
+  "description": "A web-based prototype for a multiplayer mech/factory game.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
