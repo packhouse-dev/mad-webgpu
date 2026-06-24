@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "dist/main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
@@ -10,7 +11,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js dist-server",
     "lint": "tsc --noEmit",
-    "electron:start": "electron .",
+    "electron:start": "esbuild electron/main.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/main.cjs && electron .",
+    "electron:dev": "NODE_ENV=development esbuild electron/main.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist/main.cjs && NODE_ENV=development electron .",
     "cap:sync": "cap sync"
   },
   "dependencies": {
