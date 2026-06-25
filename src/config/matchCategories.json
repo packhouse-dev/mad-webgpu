@@ -1,0 +1,66 @@
+[
+  {
+    "id": "arena",
+    "name": "Neon Arena",
+    "description": "A spacious, open arena with border walls. Perfect for high-speed maneuvering and pure dueling.",
+    "difficulty": "Easy",
+    "color": "indigo",
+    "config": {
+      "match": {
+        "time": 180,
+        "maxPlayers": 4
+      },
+      "map": {
+        "rules": [
+          { "type": "border_walls" }
+        ],
+        "size": [2.0, 2.0]
+      }
+    }
+  },
+  {
+    "id": "ruins",
+    "name": "Obsidian Ruins",
+    "description": "Procedurally generated scattered pillars. Use the ancient walls to block or take cover.",
+    "difficulty": "Medium",
+    "color": "emerald",
+    "config": {
+      "match": {
+        "time": 240,
+        "maxPlayers": 4
+      },
+      "map": {
+        "rules": [
+          { "type": "border_walls" },
+          {
+            "type": "random_obstacles",
+            "count": 18,
+            "minSize": 0.15,
+            "maxSize": 0.35
+          }
+        ],
+        "size": [2.0, 2.0]
+      }
+    }
+  },
+  {
+    "id": "labyrinth",
+    "name": "Vector Labyrinth",
+    "description": "A complex maze generated in a grid. Tight corridors and high tactical depth.",
+    "difficulty": "Hard",
+    "color": "amber",
+    "config": {
+      "match": {
+        "time": 300,
+        "maxPlayers": 4
+      },
+      "map": {
+        "rules": [
+          { "type": "border_walls" },
+          { "type": "maze_grid" }
+        ],
+        "size": [2.0, 2.0]
+      }
+    }
+  }
+]
