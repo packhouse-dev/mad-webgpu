@@ -1,11 +1,17 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { createServer as createHttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
+import { MatchConfig } from './src/types';
 
 const PORT = 3000;
+
+const defaultMatchConfigPath = path.join(process.cwd(), 'src', 'config', 'defaultMatchConfig.json');
+const defaultMatchConfig: MatchConfig = JSON.parse(fs.readFileSync(defaultMatchConfigPath, 'utf8'));
+
 
 interface Player {
   id: string;
@@ -23,6 +29,7 @@ interface Room {
   players: string[];
   status: 'waiting' | 'countdown' | 'playing';
   countdown: number;
+  config: MatchConfig;
 }
 
 const players = new Map<string, Player>();
@@ -84,7 +91,8 @@ async function startServer() {
           id: roomId,
           players: [socket.id, opponent.id],
           status: 'countdown',
-          countdown: 5
+          countdown: 5,
+          config: defaultMatchConfig
         });
 
         player.status = 'in-game';
@@ -95,7 +103,7 @@ async function startServer() {
         socket.join(roomId);
         io.sockets.sockets.get(opponent.id)?.join(roomId);
 
-        io.to(roomId).emit('match_found', { roomId, players: [player, opponent] });
+        io.to(roomId).emit('match_found', { roomId, players: [player, opponent], config: defaultMatchConfig });
         
         // Start countdown
         let countdown = 5;
@@ -116,6 +124,46 @@ async function startServer() {
       } else {
         socket.emit('waiting_for_match');
       }
+    });
+
+    socket.on('start_solo_match', () => {
+      const player = players.get(socket.id);
+      if (!player) return;
+
+      player.status = 'in-game';
+      console.log(`${socket.id} starting solo match`);
+
+      const roomId = uuidv4();
+      player.roomId = roomId;
+
+      rooms.set(roomId, {
+        id: roomId,
+        players: [socket.id],
+        status: 'countdown',
+        countdown: 5,
+        config: defaultMatchConfig
+      });
+
+      socket.join(roomId);
+
+      io.to(roomId).emit('match_found', { roomId, players: [player], config: defaultMatchConfig });
+
+      // Start countdown
+      let countdown = 5;
+      const interval = setInterval(() => {
+        countdown--;
+        if (rooms.has(roomId)) {
+          rooms.get(roomId)!.countdown = countdown;
+          io.to(roomId).emit('countdown', countdown);
+        }
+        if (countdown <= 0) {
+          clearInterval(interval);
+          if (rooms.has(roomId)) {
+            rooms.get(roomId)!.status = 'playing';
+            io.to(roomId).emit('game_start');
+          }
+        }
+      }, 1000);
     });
 
     socket.on('move', (data: { targetX: number, targetY: number }) => {

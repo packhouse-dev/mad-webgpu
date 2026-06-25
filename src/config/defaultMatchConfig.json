@@ -1,0 +1,10 @@
+{
+  "match": {
+    "time": 300,
+    "maxPlayers": 4
+  },
+  "map": {
+    "rules": [],
+    "size": [100, 100]
+  }
+}

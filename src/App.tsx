@@ -63,6 +63,13 @@ export default function App() {
     }
   };
 
+  const handleStartSoloMatch = () => {
+    if (socket) {
+      socket.emit("start_solo_match");
+      setGameState("matching");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-50 flex flex-col items-center justify-center p-4 font-sans selection:bg-indigo-500/30">
       <div className="max-w-4xl w-full text-center space-y-8">
@@ -89,12 +96,21 @@ export default function App() {
               />
             </div>
             <p className="text-neutral-400">Your color</p>
-            <button
-              onClick={handleFindMatch}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-lg font-medium transition-colors shadow-lg shadow-indigo-500/20"
-            >
-              Find Match
-            </button>
+            <div className="flex flex-col sm:flex-row justify-center items-center gap-4 max-w-md mx-auto">
+              <button
+                onClick={handleFindMatch}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-lg font-medium transition-colors shadow-lg shadow-indigo-500/20 w-full"
+              >
+                Find Match
+              </button>
+              <button
+                onClick={handleStartSoloMatch}
+                className="border border-neutral-700 hover:border-neutral-600 bg-neutral-800/50 hover:bg-neutral-800 text-neutral-300 px-8 py-3 rounded-lg font-medium transition-colors w-full flex items-center justify-center gap-2"
+              >
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                Start Solo Match (Dev)
+              </button>
+            </div>
           </div>
         )}
 
