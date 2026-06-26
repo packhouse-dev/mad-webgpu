@@ -1,13 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Socket } from "socket.io-client";
 import { Obstacle } from "../types";
-
-interface PlayerData {
-  id: string;
-  x: number;
-  y: number;
-  color: { r: number; g: number; b: number };
-}
+import { initWebGPURenderer, renderWebGPUFrame, PlayerData, WebGPUContextData } from "../client/webgpuRenderer";
 
 interface WebGPUCanvasProps {
   socket: Socket;
@@ -17,9 +11,7 @@ interface WebGPUCanvasProps {
 
 export default function WebGPUCanvas({ socket, myId, obstacles }: WebGPUCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // We keep track of players locally to render them
+  const [rendererType, setRendererType] = useState<"initializing" | "webgpu" | "2d">("initializing");
   const playersRef = useRef<Map<string, PlayerData>>(new Map());
 
   useEffect(() => {
@@ -36,209 +28,79 @@ export default function WebGPUCanvas({ socket, myId, obstacles }: WebGPUCanvasPr
 
   useEffect(() => {
     let animationFrameId: number;
+    let webgpuCtx: WebGPUContextData | null = null;
+    let is2D = false;
 
-    async function initWebGPU() {
-      const navGpu = (navigator as any).gpu;
-      if (!navGpu) {
-        setError(
-          "WebGPU is not supported in this browser. Please use Chrome/Edge or enable WebGPU.",
-        );
-        return;
+    async function initialize() {
+      if (!canvasRef.current) return;
+      
+      const ctx = await initWebGPURenderer(canvasRef.current, obstacles);
+      if (ctx) {
+        webgpuCtx = ctx;
+        setRendererType("webgpu");
+      } else {
+        is2D = true;
+        setRendererType("2d");
+        console.warn("WebGPU not available, falling back to Canvas2D");
       }
+      
+      const canvas2dCtx = is2D ? canvasRef.current.getContext("2d") : null;
 
-      const adapter = await navGpu.requestAdapter();
-      if (!adapter) {
-        setError("Failed to get WebGPU adapter.");
-        return;
-      }
-
-      const device = await adapter.requestDevice();
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const context = canvas.getContext("webgpu") as any;
-      if (!context) {
-        setError("Failed to get WebGPU context.");
-        return;
-      }
-
-      const presentationFormat = navGpu.getPreferredCanvasFormat();
-      context.configure({
-        device,
-        format: presentationFormat,
-        alphaMode: "premultiplied",
-      });
-
-      // Shaders supporting vec2f scale for flexible rectangles and squares
-      const shaderModule = device.createShaderModule({
-        code: `
-          struct VertexInput {
-            @location(0) position: vec2f,
-            @location(1) color: vec3f,
-            @location(2) scale: vec2f,
-          };
-
-          struct VertexOutput {
-            @builtin(position) position: vec4f,
-            @location(0) color: vec3f,
-          };
-
-          @vertex
-          fn vs_main(
-            @builtin(vertex_index) vertexIndex : u32,
-            @builtin(instance_index) instanceIdx : u32,
-            input: VertexInput
-          ) -> VertexOutput {
-            var pos = array<vec2f, 6>(
-              vec2f(-0.03, -0.03),
-              vec2f( 0.03, -0.03),
-              vec2f(-0.03,  0.03),
-              vec2f(-0.03,  0.03),
-              vec2f( 0.03, -0.03),
-              vec2f( 0.03,  0.03)
-            );
-
-            var output: VertexOutput;
-            var scaled_pos = pos[vertexIndex] * input.scale;
-            output.position = vec4f(scaled_pos + input.position, 0.0, 1.0);
-            output.color = input.color;
-            return output;
-          }
-
-          @fragment
-          fn fs_main(input: VertexOutput) -> @location(0) vec4f {
-            return vec4f(input.color, 1.0);
-          }
-        `,
-      });
-
-      // Pipeline
-      const pipeline = device.createRenderPipeline({
-        layout: "auto",
-        vertex: {
-          module: shaderModule,
-          entryPoint: "vs_main",
-          buffers: [
-            {
-              arrayStride: 28, // 2 floats pos, 3 floats color, 2 floats scale = 7 * 4
-              stepMode: "instance",
-              attributes: [
-                { shaderLocation: 0, offset: 0, format: "float32x2" },
-                { shaderLocation: 1, offset: 8, format: "float32x3" },
-                { shaderLocation: 2, offset: 20, format: "float32x2" },
-              ],
-            },
-          ],
-        },
-        fragment: {
-          module: shaderModule,
-          entryPoint: "fs_main",
-          targets: [{ format: presentationFormat }],
-        },
-        primitive: {
-          topology: "triangle-list",
-        },
-      });
-
-      // Buffer for player instances
-      const maxEntities = 10;
-      const instanceBuffer = device.createBuffer({
-        size: maxEntities * 28,
-        usage: 0x0010 | 0x0008, // Vertex | Copy_Dst
-      });
-
-      // Buffer for obstacle instances
-      const obstacleInstanceBuffer = device.createBuffer({
-        size: Math.max(obstacles.length, 1) * 28,
-        usage: 0x0010 | 0x0008, // Vertex | Copy_Dst
-      });
-
-      // Write static obstacle instance data to GPU once!
-      if (obstacles.length > 0) {
-        const obsData = new Float32Array(obstacles.length * 7);
-        for (let i = 0; i < obstacles.length; i++) {
-          const obs = obstacles[i];
-          obsData[i * 7 + 0] = obs.x;
-          obsData[i * 7 + 1] = obs.y;
-          obsData[i * 7 + 2] = obs.color.r;
-          obsData[i * 7 + 3] = obs.color.g;
-          obsData[i * 7 + 4] = obs.color.b;
-          // Base quad is 0.06 x 0.06. Scale appropriately:
-          obsData[i * 7 + 5] = obs.width / 0.06;
-          obsData[i * 7 + 6] = obs.height / 0.06;
-        }
-        device.queue.writeBuffer(obstacleInstanceBuffer, 0, obsData);
-      }
-
-      function render(now: number) {
-        if (!context || !device) return;
-
+      function renderLoop(now: number) {
         const players = Array.from(playersRef.current.values()) as PlayerData[];
-
-        // Prepare player rendering data
-        const instanceData = new Float32Array(players.length * 7);
-        for (let i = 0; i < players.length; i++) {
-          const p = players[i];
-          instanceData[i * 7 + 0] = p.x;
-          instanceData[i * 7 + 1] = p.y;
-          instanceData[i * 7 + 2] = p.color.r;
-          instanceData[i * 7 + 3] = p.color.g;
-          instanceData[i * 7 + 4] = p.color.b;
-          // Determine scale (slightly larger for local player)
-          const scaleVal = p.id === myId ? 1.5 : 1.0;
-          instanceData[i * 7 + 5] = scaleVal;
-          instanceData[i * 7 + 6] = scaleVal;
+        
+        if (!is2D && webgpuCtx) {
+          try {
+            renderWebGPUFrame(webgpuCtx, players, myId, obstacles.length);
+          } catch(e) {
+            console.error("WebGPU render error:", e);
+          }
+        } else if (is2D && canvas2dCtx && canvasRef.current) {
+          const width = canvasRef.current.width;
+          const height = canvasRef.current.height;
+          
+          canvas2dCtx.fillStyle = "rgb(13, 13, 20)";
+          canvas2dCtx.fillRect(0, 0, width, height);
+          
+          const toScreenX = (ndcX: number) => ((ndcX + 1) / 2) * width;
+          const toScreenY = (ndcY: number) => ((-ndcY + 1) / 2) * height;
+          
+          // Draw obstacles
+          obstacles.forEach(obs => {
+            const pixelW = (obs.width / 2) * width;
+            const pixelH = (obs.height / 2) * height;
+            const px = toScreenX(obs.x) - pixelW / 2;
+            const py = toScreenY(obs.y) - pixelH / 2;
+            canvas2dCtx.fillStyle = `rgb(${obs.color.r * 255}, ${obs.color.g * 255}, ${obs.color.b * 255})`;
+            canvas2dCtx.fillRect(px, py, pixelW, pixelH);
+          });
+          
+          // Draw players
+          players.forEach(p => {
+            const isMe = p.id === myId;
+            const baseSize = 0.06;
+            const scale = isMe ? 1.5 : 1.0;
+            const sizeW = (baseSize * scale / 2) * width;
+            const sizeH = (baseSize * scale / 2) * height;
+            
+            const px = toScreenX(p.x) - sizeW / 2;
+            const py = toScreenY(p.y) - sizeH / 2;
+            
+            canvas2dCtx.fillStyle = `rgb(${p.color.r * 255}, ${p.color.g * 255}, ${p.color.b * 255})`;
+            canvas2dCtx.fillRect(px, py, sizeW, sizeH);
+          });
         }
-
-        if (players.length > 0) {
-          device.queue.writeBuffer(instanceBuffer, 0, instanceData);
-        }
-
-        // WebGPU render pass
-        const commandEncoder = device.createCommandEncoder();
-        const textureView = context.getCurrentTexture().createView();
-
-        const renderPassDescriptor: any = {
-          colorAttachments: [
-            {
-              view: textureView,
-              clearValue: { r: 0.05, g: 0.05, b: 0.08, a: 1.0 }, // Dark grid space
-              loadOp: "clear",
-              storeOp: "store",
-            },
-          ],
-        };
-
-        const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
-        passEncoder.setPipeline(pipeline);
-
-        // 1. Draw Static Map Obstacles
-        if (obstacles.length > 0) {
-          passEncoder.setVertexBuffer(0, obstacleInstanceBuffer);
-          passEncoder.draw(6, obstacles.length, 0, 0);
-        }
-
-        // 2. Draw Players
-        if (players.length > 0) {
-          passEncoder.setVertexBuffer(0, instanceBuffer);
-          passEncoder.draw(6, players.length, 0, 0);
-        }
-
-        passEncoder.end();
-        device.queue.submit([commandEncoder.finish()]);
-
-        animationFrameId = requestAnimationFrame(render);
+        
+        animationFrameId = requestAnimationFrame(renderLoop);
       }
 
-      render(performance.now());
+      renderLoop(performance.now());
     }
 
-    initWebGPU();
+    initialize();
 
     return () => {
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-      }
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
     };
   }, [myId, obstacles]);
 
@@ -250,8 +112,6 @@ export default function WebGPUCanvas({ socket, myId, obstacles }: WebGPUCanvasPr
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Convert pixel coordinates to WebGPU Normalized Device Coordinates (-1 to 1)
-    // In WebGPU, +Y is up, -Y is down
     const ndcX = (x / rect.width) * 2 - 1;
     const ndcY = -((y / rect.height) * 2 - 1);
 
@@ -260,23 +120,20 @@ export default function WebGPUCanvas({ socket, myId, obstacles }: WebGPUCanvasPr
 
   return (
     <div className="relative w-full aspect-video bg-neutral-950 rounded-xl overflow-hidden border border-neutral-800 shadow-inner">
-      {error ? (
-        <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-red-400 font-medium">
-          {error}
-        </div>
-      ) : (
-        <canvas
-          ref={canvasRef}
-          width={800}
-          height={450}
-          className="w-full h-full block object-contain cursor-crosshair"
-          onClick={handleCanvasClick}
-        />
-      )}
+      <canvas
+        ref={canvasRef}
+        width={800}
+        height={450}
+        className="w-full h-full block object-contain cursor-crosshair"
+        onClick={handleCanvasClick}
+      />
       <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-sm text-xs px-3 py-1.5 rounded-md text-white font-mono pointer-events-none border border-white/10 shadow-sm flex flex-col gap-1">
-        <span className="font-bold text-indigo-400">WebGPU Arena</span>
+        <span className="font-bold text-indigo-400">
+          Arena Engine: {rendererType === "initializing" ? "..." : rendererType.toUpperCase()}
+        </span>
         <span className="text-neutral-400">Click to navigate your node</span>
       </div>
     </div>
   );
 }
+

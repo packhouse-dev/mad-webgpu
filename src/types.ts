@@ -42,5 +42,16 @@ export interface Player {
   color: { r: number; g: number; b: number };
   status: 'lobby' | 'matching' | 'in-game';
   roomId: string | null;
+  categoryId: string | null;
 }
+
+export interface Room {
+  id: string;
+  players: string[];
+  status: 'waiting' | 'countdown' | 'playing';
+  countdown: number;
+  config: MatchConfig;
+  obstacles: Obstacle[];
+}
+
 
